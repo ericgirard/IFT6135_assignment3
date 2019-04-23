@@ -5,6 +5,8 @@ import torchvision.transforms as transforms
 import torch
 import classify_svhn
 from classify_svhn import Classifier
+import numpy as np
+from scipy import linalg
 
 SVHN_PATH = "svhn"
 PROCESS_BATCH_SIZE = 32
@@ -57,6 +59,25 @@ def get_test_loader(batch_size):
         batch_size=batch_size,
     )
     return testloader
+    
+def get_train_loader(batch_size):
+    """
+    Downloads (if it doesn't already exist) SVHN test into
+    [pwd]/svhn.
+
+    Returns an iterator over the tensors of the images
+    of dimension (batch_size, 3, 32, 32)
+    """
+    trainset = torchvision.datasets.SVHN(
+        SVHN_PATH, split='train',
+        download=True,
+        transform=classify_svhn.image_transform
+    )
+    trainloader = torch.utils.data.DataLoader(
+        trainset,
+        batch_size=batch_size,
+    )
+    return trainloader
 
 
 def extract_features(classifier, data_loader):
@@ -72,14 +93,26 @@ def extract_features(classifier, data_loader):
 
 def calculate_fid_score(sample_feature_iterator,
                         testset_feature_iterator):
-    """
-    To be implemented by you!
-    """
-    raise NotImplementedError(
-        "TO BE IMPLEMENTED."
-        "Part of Assignment 3 Quantitative Evaluations"
-    )
 
+    #stack sample features
+    sample_list = np.array([sample for sample in sample_feature_iterator])
+    testset_list = np.array([sample for sample in testset_feature_iterator])
+
+    #calculate mean and covariance of features
+    mu_p = np.mean(sample_list, axis=0)
+    cov_p =  np.cov(sample_list, rowvar=False)
+    mu_q = np.mean(testset_list, axis=0)
+    cov_q =  np.cov(testset_list, rowvar=False)
+
+    #calculate square of cov_p*coq_q with offset to avoid imaginary number
+    epsilon = 0.0001
+    offset = np.eye(cov_p.shape[0]) * epsilon
+    covmean = linalg.sqrtm((cov_p + offset).dot(cov_q + offset))
+    
+    diff = mu_p - mu_q
+    
+    return (diff.dot(diff) + np.trace(cov_p) +np.trace(cov_q) - 2 *  np.trace(covmean))
+	
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -105,10 +138,14 @@ if __name__ == "__main__":
 
     sample_loader = get_sample_loader(args.directory,
                                       PROCESS_BATCH_SIZE)
+                                      
+    train_loader = get_train_loader(PROCESS_BATCH_SIZE)
     sample_f = extract_features(classifier, sample_loader)
+    train_f = extract_features(classifier, train_loader)
 
     test_loader = get_test_loader(PROCESS_BATCH_SIZE)
     test_f = extract_features(classifier, test_loader)
 
+    #fid_score = calculate_fid_score(train_f, test_f)
     fid_score = calculate_fid_score(sample_f, test_f)
     print("FID score:", fid_score)
